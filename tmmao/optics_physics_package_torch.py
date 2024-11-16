@@ -46,35 +46,54 @@ class optics_tmm(comp_utils):
         return dyp1
 
     def interface_tm(self, x, y, yp1, sim_params, tracked_info, mat1Left={}, mat2Left={}, mat1Right={}, mat2Right={}):
+        # Set default refractive indices if not provided
+        default_mat = {'refractiveIndex': 1.0}  # Default to air
+        mat1Left = mat1Left or default_mat
+        mat2Left = mat2Left or default_mat
+        mat1Right = mat1Right or default_mat
+        mat2Right = mat2Right or default_mat
+
+        # Get kx from tracked_info
         kx = tracked_info['kx']
+        kx_t = torch.tensor(kx, dtype=torch.complex64) if not torch.is_tensor(kx) else kx
+
+        # Handle log_ratio and n_is_optParam cases
         if not self.n_is_optParam:
             if self.log_ratio:
                 y = (100**y - 1)/99
                 yp1 = (100**yp1 - 1)/99
-            n1L, n2L = mat1Left['refractiveIndex'], mat2Left['refractiveIndex']
-            n1R, n2R = mat1Right['refractiveIndex'], mat2Right['refractiveIndex']
+
+            # Get refractive indices and interpolate
+            n1L = torch.tensor(mat1Left['refractiveIndex'], dtype=torch.complex64)
+            n2L = torch.tensor(mat2Left['refractiveIndex'], dtype=torch.complex64)
+            n1R = torch.tensor(mat1Right['refractiveIndex'], dtype=torch.complex64)
+            n2R = torch.tensor(mat2Right['refractiveIndex'], dtype=torch.complex64)
+
             nL = y * n2L + (1-y) * n1L
             nR = yp1 * n2R + (1-yp1) * n1R
         else:
-            nL, nR = y, yp1
+            # Direct use of y and yp1 as refractive indices
+            nL = torch.tensor(y, dtype=torch.complex64)
+            nR = torch.tensor(yp1, dtype=torch.complex64)
 
-        # Convert to torch tensors and compute
-        epL = torch.tensor(nL**2, dtype=torch.complex64)
-        epR = torch.tensor(nR**2, dtype=torch.complex64)
-        kx_t = torch.tensor(kx, dtype=torch.complex64)
+        # Calculate wave vectors
+        k0 = 2 * torch.pi / sim_params['simPoint']
+        kL = k0 * nL
+        kR = k0 * nR
 
-        # Complex square root using torch
-        kzL = torch.sqrt(epL - kx_t**2)
-        kzR = torch.sqrt(epR - kx_t**2)
+        # Calculate z components
+        kzL = torch.sqrt(kL**2 - kx_t**2 + 0j)
+        kzR = torch.sqrt(kR**2 - kx_t**2 + 0j)
 
-        t, r = self.get_tr(kzL, kzR, torch.tensor(nL), torch.tensor(nR), sim_params['third_vars']['polarization'])
+        # Get transmission and reflection coefficients based on polarization
+        t, r = self.get_tr(kzL, kzR, nL, nR, sim_params['third_vars']['polarization'])
 
-        # Phase calculations
-        phase = 1j * kzL * (2 * torch.pi / sim_params['simPoint']) * x
+        # Build transfer matrix with phase
+        phase = 1j * kzL * x
         p = torch.tensor([[torch.exp(-phase), 0], [0, torch.exp(phase)]], dtype=torch.complex64)
         m = (1/t) * torch.tensor([[1, r], [r, 1]], dtype=torch.complex64)
 
-        return torch.matmul(p, m), {'kx': kx, 'p': p, 'm': m}
+        return torch.matmul(p, m), tracked_info
 
     def get_tr(self, kzL, kzR, nL, nR, pol):
         epL = nL**2

@@ -73,12 +73,25 @@ class optics_tmm(comp_utils):
             y = torch.tensor(y, dtype=torch.float32) if not torch.is_tensor(y) else y
             yp1 = torch.tensor(yp1, dtype=torch.float32) if not torch.is_tensor(yp1) else yp1
 
+            # Handle case where y or yp1 might be dictionaries
+            if isinstance(y, dict):
+                y = torch.tensor(y.get('refractiveIndex', 1.0), dtype=torch.float32)
+            if isinstance(yp1, dict):
+                yp1 = torch.tensor(yp1.get('refractiveIndex', 1.0), dtype=torch.float32)
+
             nL = y * n2L + (1-y) * n1L
             nR = yp1 * n2R + (1-yp1) * n1R
         else:
             # Direct use of y and yp1 as refractive indices
-            nL = torch.tensor(y, dtype=torch.complex64)
-            nR = torch.tensor(yp1, dtype=torch.complex64)
+            if isinstance(y, dict):
+                nL = torch.tensor(y.get('refractiveIndex', 1.0), dtype=torch.complex64)
+            else:
+                nL = torch.tensor(y, dtype=torch.complex64)
+
+            if isinstance(yp1, dict):
+                nR = torch.tensor(yp1.get('refractiveIndex', 1.0), dtype=torch.complex64)
+            else:
+                nR = torch.tensor(yp1, dtype=torch.complex64)
 
         # Calculate wave vectors
         k0 = 2 * torch.pi / sim_params['simPoint']
@@ -90,7 +103,7 @@ class optics_tmm(comp_utils):
         kzR = torch.sqrt(kR**2 - kx_t**2 + 0j)
 
         # Get transmission and reflection coefficients based on polarization
-        t, r = self.get_tr(kzL, kzR, nL, nR, sim_params['third_vars']['polarization'])
+        t, r = self.get_tr(kzL, kzR, nL, nR, sim_params['third_vars'][0]['polarization'])
 
         # Build transfer matrix with phase
         phase = 1j * kzL * x

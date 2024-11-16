@@ -44,6 +44,15 @@ class optics_tmm(comp_utils):
         else:
             raise ValueError("No simulation point or wavelength found in sim_params")
 
+    def get_polarization(self, sim_params):
+        if 'third_vars' in sim_params:
+            if isinstance(sim_params['third_vars'], list):
+                if len(sim_params['third_vars']) > 0:
+                    return sim_params['third_vars'][0].get('polarization', 'p')
+            else:
+                return sim_params['third_vars'].get('polarization', 'p')
+        return 'p'
+
     def global_bcs(self, param0, paramN, sim_params, mat1params={}, mat2params={}):
         # Initialize kx from sim_params if available
         kx = 0.0

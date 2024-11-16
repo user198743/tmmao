@@ -229,7 +229,9 @@ class optics_tmm(comp_utils):
     def costFunc_navgtv(self, simPoints, callPoints, third_vars, cur_x, cur_y, all_mat1params,
                        all_mat2params, all_param0s, all_paramNs, all_fields, all_tms,
                        all_global_bcs, all_cf_factors, all_scheduler_factors, all_custom_input):
-        """Cost function for non-averaged transmission/reflection"""
+        """Cost function for non-averaged transmission/reflection
+        cf_factors keys: [0: T linear, 1: R linear, 2: T log, 3: R log, 4: A linear, 5: [T-target,cost], 6: [R-Target, cost]]
+        """
         # Convert inputs to PyTorch tensors
         L = torch.tensor(0.0, dtype=torch.float64)
 
@@ -238,8 +240,12 @@ class optics_tmm(comp_utils):
             # Calculate transmission for each field
             T_vals = torch.stack([self.T(torch.tensor(e, dtype=torch.complex64)) for e in fields])
 
+            # Convert dictionary keys to integers and sort them
+            sorted_keys = sorted([int(k) if isinstance(k, str) else k for k in cf_factors.keys()])
+            # Get values in sorted key order
+            weights = torch.tensor([cf_factors[str(k) if isinstance(k, str) else k] for k in sorted_keys], dtype=torch.float64)
+
             # Apply weights and sum
-            weights = torch.tensor(list(cf_factors.values()), dtype=torch.float64)
             L += torch.sum(weights * T_vals)
 
         return -L.item()

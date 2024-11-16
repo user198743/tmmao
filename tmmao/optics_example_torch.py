@@ -1,7 +1,7 @@
 import torch
 import os
 from agnostic_director import agnostic_director
-from optics_physics_package import optics_tmm
+from optics_physics_package_torch import optics_tmm  # Use PyTorch version
 import materials_library
 import matplotlib.pyplot as plt
 

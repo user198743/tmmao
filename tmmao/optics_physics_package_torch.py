@@ -98,6 +98,9 @@ class optics_tmm(comp_utils):
         return dx, dy
 
     def tm(self, x, xp1, y, yp1, sim_params, tracked_info, mat1params={}, mat2params={}):
+        if tracked_info is None or 'kx' not in tracked_info:
+            tracked_info = tracked_info or {}
+            tracked_info['kx'] = torch.sin(torch.tensor(sim_params['third_vars']['incidentAngle'], dtype=torch.float64))
         return self.interface_tm(x, y, yp1, sim_params, tracked_info, mat1params, mat2params, mat1params, mat2params)
 
     def dtm(self, x, y, yp1, sim_params, tracked_info, tm, mat1params={}, mat2params={}):

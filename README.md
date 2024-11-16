@@ -69,5 +69,10 @@ Actually, nothing too exotic! The following packages are required for `agnostic_
 
 ## Testing/Demos
 ---
-To test this module (and see how to use its API), try out `optics_example.ipynb` / `acoustics_example.ipynb` / `quantum_example.ipynb`. These are very heavily commented interactive notebooks that walk you through each step in using `agnostic_director.py` to do some inverse designs. You can run them locally using the notebooks in the `tmmao` subfolder, but the easiest way to play with them is clicking the Open In Colab link at the top of each of the example files in the main folder, next to this document. No installation required!
+To test this module (and see how to use its API), you have two options:
 
+1. Interactive Notebooks:
+   Try out `optics_example.ipynb` / `acoustics_example.ipynb` / `quantum_example.ipynb`. These are heavily commented interactive notebooks that walk you through each step in using `agnostic_director.py`. You can run them locally using the notebooks in the `tmmao` subfolder, or click the Open In Colab link at the top of each example file in the main folder. No installation required!
+
+2. Python Script:
+   For a standalone Python implementation, use `optics_example.py`. This script demonstrates the optimization of Multivariate Optical Elements (MOEs) using the Transfer Matrix Method. For detailed instructions on running the script, see `INSTRUCTIONS.txt`.

@@ -25,7 +25,7 @@ def main(device=None):
                      dtype=torch.float64, device=device)
 
     # Load physics functions with device
-    physics = optics_tmm(device=device)  # Pass device to physics package
+    physics = optics_tmm  # Pass the class, not an instance
     ad.set_physics(physics_package=physics,
                   mat1Call=materials_library.siliconDioxide,
                   mat2Call=materials_library.silicon,

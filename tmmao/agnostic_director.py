@@ -73,7 +73,12 @@ class agnostic_director(agnostic_analysis):
     #   sim_params={'callPoint': simulation point in SI units,'simPoint':simulation point in (possibly scaled) simualtion units,'third_vars':list of third variables,'simType':type of simulation point ('frequency','wavelength', or 'energy'),'physics':type of physics, name given by physics package}
     #CustomInputCall is a callable, taking sim_params dicitonary as input and returning some object to be sent to costFunc. For example, this could be a custom incident acoustic power spectrum which the cost function will utilize.
     def set_physics(self,physics_package,mat1Call,mat2Call,param0Call,paramNCall,customInputCall=''):
-        self.pp=physics_package()
+        # Initialize physics package with device if it has a device parameter
+        if hasattr(physics_package, '__init__') and 'device' in physics_package.__init__.__code__.co_varnames:
+            self.pp = physics_package(device=None)  # Let the physics package choose its default device
+        else:
+            self.pp = physics_package()
+
         self.mat1Call=mat1Call
         self.mat2Call=mat2Call
         self.param0Call=param0Call

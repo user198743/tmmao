@@ -21,8 +21,22 @@ class optics_tmm(comp_utils):
     def get_name(self):
         return 'optics'
 
+    def safe_extract_value(self, value):
+        if torch.is_tensor(value):
+            return value.detach().cpu().numpy()
+        elif isinstance(value, (list, tuple)):
+            return [self.safe_extract_value(v) for v in value]
+        elif isinstance(value, dict):
+            if 'refractiveIndex' in value:
+                return value['refractiveIndex']
+            return {k: self.safe_extract_value(v) for k, v in value.items()}
+        elif isinstance(value, (int, float, complex)):
+            return value
+        elif hasattr(value, 'item'):
+            return value.item()
+        return value
+
     def global_bcs(self, param0, paramN, sim_params, mat1params={}, mat2params={}):
-        """Return global boundary conditions for optimization"""
         # Initialize kx from sim_params if available
         kx = 0.0
         if 'third_vars' in sim_params:

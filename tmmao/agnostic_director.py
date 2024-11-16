@@ -73,11 +73,16 @@ class agnostic_director(agnostic_analysis):
     #   sim_params={'callPoint': simulation point in SI units,'simPoint':simulation point in (possibly scaled) simualtion units,'third_vars':list of third variables,'simType':type of simulation point ('frequency','wavelength', or 'energy'),'physics':type of physics, name given by physics package}
     #CustomInputCall is a callable, taking sim_params dicitonary as input and returning some object to be sent to costFunc. For example, this could be a custom incident acoustic power spectrum which the cost function will utilize.
     def set_physics(self,physics_package,mat1Call,mat2Call,param0Call,paramNCall,customInputCall=''):
-        # Initialize physics package with device if it has a device parameter
-        if hasattr(physics_package, '__init__') and 'device' in physics_package.__init__.__code__.co_varnames:
-            self.pp = physics_package(device=None)  # Let the physics package choose its default device
+        # Handle both class and instance inputs for physics_package
+        if isinstance(physics_package, type):
+            # It's a class, initialize it
+            if hasattr(physics_package, '__init__') and 'device' in physics_package.__init__.__code__.co_varnames:
+                self.pp = physics_package(device=None)  # Let physics package choose default device
+            else:
+                self.pp = physics_package()
         else:
-            self.pp = physics_package()
+            # It's already an instance
+            self.pp = physics_package
 
         self.mat1Call=mat1Call
         self.mat2Call=mat2Call
@@ -296,52 +301,69 @@ class agnostic_director(agnostic_analysis):
         del self.all_tracked_tm_info[:]
         self._updateLayers(simDict['parameters'])#Re-partition the layers. Doesn't take too long and it's nice to not have to keep track of when the structure has changed
         i=0
+        # Ensure device information is propagated
+        if hasattr(self.pp, 'device'):
+            self.sim_params['device'] = self.pp.device
+
+        # Ensure third_vars is properly initialized
+        if not hasattr(self, 'third_vars') or not self.third_vars:
+            self.third_vars = [{'incidentAngle': 0, 'polarization': 's'}]
+
         for tv in self.third_vars:#Run through third variables
+            # Update sim_params with current third_vars
+            self.sim_params['third_vars'] = [tv]  # Ensure it's a list containing the current third_vars dict
+
             for k in range(len(self.simPoints)):#Run through simulation points
-                self.sim_params['third_vars'],self.sim_params['simPoint'],self.sim_params['callPoint']=tv,self.simPoints[k],self.callPoints[k]#Update sim_params dictionary
+                self.sim_params['simPoint'],self.sim_params['callPoint']=self.simPoints[k],self.callPoints[k]#Update sim_params dictionary
                 mat1params,mat2params,param0,paramN=self.all_mat1params[i],self.all_mat2params[i],self.all_param0s[i],self.all_paramNs[i]#Grab material parameter dictionaries
-                self.all_tms.append([])#All_tms will have one list per third_var-simPoint pair
-                self.all_tracked_tm_info.append([])
-                tracked_info={}#Initialize tracked_info as an empty dictionary
+
+                current_tms = []  # List to store transfer matrices for current iteration
+                current_tracked_info = []  # List to store tracked info for current iteration
+                tracked_info = {}  # Initialize tracked_info as empty dictionary
+
                 if len(self.superstrates)>0:#If we have superstrates
-                    tm,tracked_info=self.pp.left_tm(1,self.sim_params,param0,self.superstrates[0]['material_call'](self.sim_params),self.superstrates[0]['material_call'](self.sim_params))#Do the incidence medium interface with the first superstrate
-                    self.all_tracked_tm_info[-1].append(tracked_info)
-                    self.all_tms[-1].append(tm)
+                    tm,tracked_info=self.pp.left_tm(1,self.sim_params,tracked_info,param0,self.superstrates[0]['material_call'](self.sim_params),self.superstrates[0]['material_call'](self.sim_params))#Do the incidence medium interface with the first superstrate
+                    current_tracked_info.append(tracked_info)
+                    current_tms.append(tm)
                     for m in range(len(self.superstrates)):#Run through all the superstrates
                         ss=self.superstrates[m]
                         if m<len(self.superstrates)-1:#If there is another superstrate after this one, use it for the interface matrix
                             tm,tracked_info=self.pp.interface_tm(ss['thickness'],1,1,self.sim_params,tracked_info,ss['material_call'](self.sim_params),ss['material_call'](self.sim_params),self.superstrates[m+1]['material_call'](self.sim_params),self.superstrates[m+1]['material_call'](self.sim_params))
                         else:#If there is not another superstrate after this one, use the first optimization layer for the interface matrix
                             tm,tracked_info=self.pp.interface_tm(ss['thickness'],1,self.yLayer[0],self.sim_params,tracked_info,ss['material_call'](self.sim_params),ss['material_call'](self.sim_params),mat1params,mat2params)
-                        self.all_tms[-1].append(tm)
-                        self.all_tracked_tm_info[-1].append(tracked_info)
+                        current_tms.append(tm)
+                        current_tracked_info.append(tracked_info)
                 else:#If there are no superstrates, do the incidence medium interface with the first simulation layer
-                    tm,tracked_info=self.pp.left_tm(self.yLayer[0],self.sim_params,param0,mat1params,mat2params)
-                    self.all_tracked_tm_info[-1].append(tracked_info)
-                    self.all_tms[-1].append(tm)
+                    tm,tracked_info=self.pp.left_tm(self.yLayer[0],self.sim_params,tracked_info,param0,mat1params,mat2params)
+                    current_tracked_info.append(tracked_info)
+                    current_tms.append(tm)
                 x,y=self.xLayer[0],self.yLayer[0]#At this point, we are at the first field point inside the optimization region
                 for j in range(len(self.xLayer)-1):#Run through each optimziaiton layer, minus the last one
                     xp1,yp1=self.xLayer[j+1],self.yLayer[j+1]#Get the x/y of the next optimzation layer
                     tm,tracked_info=self.pp.tm(x,y,yp1,self.sim_params,tracked_info,mat1params,mat2params)#Build the transfer matrix
-                    self.all_tms[-1].append(tm)
-                    self.all_tracked_tm_info[-1].append(tracked_info)
+                    current_tms.append(tm)
+                    current_tracked_info.append(tracked_info)
                     x,y=xp1,yp1#Update x/y for the next iteration
                 #At this point, x,y are the x/y of the last optimization layer, the transfer matrix of which has not yet been computed
                 if len(self.substrates)>0:#If we have substrates
                     tm,tracked_info=self.pp.interface_tm(x,y,1,self.sim_params,tracked_info,mat1params,mat2params,self.substrates[0]['material_call'](self.sim_params),self.substrates[0]['material_call'](self.sim_params))#Build the last-optimization-layer-2-first-substrate matrix
-                    self.all_tracked_tm_info[-1].append(tracked_info)
-                    self.all_tms[-1].append(tm)
+                    current_tracked_info.append(tracked_info)
+                    current_tms.append(tm)
                     for m in range(len(self.substrates)):#Run through all the substrates
                         ss=self.substrates[m]
                         if m<len(self.substrates)-1:#If this is not the last substrate
                             tm,tracked_info=self.pp.interface_tm(ss['thickness'],1,1,self.sim_params,tracked_info,ss['material_call'](self.sim_params),ss['material_call'](self.sim_params),self.substrates[m+1]['material_call'](self.sim_params),self.substrates[m+1]['material_call'](self.sim_params))#Connect this and the next substrate
-                            self.all_tracked_tm_info[-1].append(tracked_info)
+                            current_tracked_info.append(tracked_info)
                         else:#If it is the last substrate
-                            tm=self.pp.right_tm(ss['thickness'],1,self.sim_params,tracked_info,ss['material_call'](self.sim_params),ss['material_call'](self.sim_params),paramN)#Connect it and the transmission medium
-                        self.all_tms[-1].append(tm)
-                else:#If there are no substrates, connect the last optimizaiton layer to the transmission medium
-                    tm=self.pp.right_tm(x,y,self.sim_params,tracked_info,mat1params,mat2params,paramN)
-                    self.all_tms[-1].append(tm)
+                            tm=self.pp.right_tm(ss['thickness'], self.sim_params, tracked_info, paramN, ss['material_call'](self.sim_params))#Connect it and the transmission medium
+                        current_tms.append(tm)
+                else:
+                    tm=self.pp.right_tm(y, self.sim_params, tracked_info, paramN, mat1params, mat2params)#Connect the last optimization layer to transmission medium
+                    current_tms.append(tm)
+
+                # Append the lists for this iteration
+                self.all_tms.append(current_tms)
+                self.all_tracked_tm_info.append(current_tracked_info)
                 i+=1
         return self.all_tms
 

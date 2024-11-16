@@ -60,14 +60,18 @@ class optics_tmm(comp_utils):
         # Handle log_ratio and n_is_optParam cases
         if not self.n_is_optParam:
             if self.log_ratio:
-                y = (100**y - 1)/99
-                yp1 = (100**yp1 - 1)/99
+                y = torch.tensor((100**float(y) - 1)/99, dtype=torch.float32)
+                yp1 = torch.tensor((100**float(yp1) - 1)/99, dtype=torch.float32)
 
             # Get refractive indices and interpolate
             n1L = torch.tensor(mat1Left['refractiveIndex'], dtype=torch.complex64)
             n2L = torch.tensor(mat2Left['refractiveIndex'], dtype=torch.complex64)
             n1R = torch.tensor(mat1Right['refractiveIndex'], dtype=torch.complex64)
             n2R = torch.tensor(mat2Right['refractiveIndex'], dtype=torch.complex64)
+
+            # Convert y and yp1 to tensors if they aren't already
+            y = torch.tensor(y, dtype=torch.float32) if not torch.is_tensor(y) else y
+            yp1 = torch.tensor(yp1, dtype=torch.float32) if not torch.is_tensor(yp1) else yp1
 
             nL = y * n2L + (1-y) * n1L
             nR = yp1 * n2R + (1-yp1) * n1R
@@ -96,16 +100,26 @@ class optics_tmm(comp_utils):
         return torch.matmul(p, m), tracked_info
 
     def get_tr(self, kzL, kzR, nL, nR, pol):
+        """Calculate transmission and reflection coefficients"""
+        # Convert inputs to PyTorch tensors if they aren't already
+        kzL = torch.as_tensor(kzL, dtype=torch.complex64)
+        kzR = torch.as_tensor(kzR, dtype=torch.complex64)
+        nL = torch.as_tensor(nL, dtype=torch.complex64)
+        nR = torch.as_tensor(nR, dtype=torch.complex64)
+
+        # Calculate permittivities
         epL = nL**2
         epR = nR**2
-        if pol == 'p':
+
+        if pol == 'p':  # TM polarization
             d = epL * kzR + kzL * epR
             t = 2 * torch.sqrt(epL * epR) * kzL / d
             r = (epR * kzL - epL * kzR) / d
-        else:
+        else:  # TE polarization (s)
             d = kzR + kzL
             t = 2 * kzL / d
             r = (kzL - kzR) / d
+
         return t, r
 
     def right_tm(self, x, y, sim_params, tracked_info, mat1Left={}, mat2Left={}, matRight={}):

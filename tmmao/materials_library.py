@@ -1,8 +1,25 @@
 
+import torch
 from misc_utils import comp_utils
 import numpy as np
 from copy import copy, deepcopy
 import cmath as cm
+
+def to_tensor(value, device=None):
+    """Convert input to PyTorch tensor with proper device placement"""
+    if isinstance(value, torch.Tensor):
+        return value.to(device) if device is not None else value
+    if isinstance(value, (int, float)):
+        return torch.tensor(value, dtype=torch.float64, device=device)
+    if isinstance(value, complex):
+        return torch.complex(torch.tensor(value.real, dtype=torch.float64, device=device),
+                           torch.tensor(value.imag, dtype=torch.float64, device=device))
+    if isinstance(value, np.ndarray):
+        if np.iscomplexobj(value):
+            return torch.complex(torch.tensor(value.real, dtype=torch.float64, device=device),
+                               torch.tensor(value.imag, dtype=torch.float64, device=device))
+        return torch.tensor(value, dtype=torch.float64, device=device)
+    return value
 
 def afunc(kpp,rho,w,a,kp):
     return np.imag(w*cm.sqrt(rho/(kp+1j*kpp)))-a
@@ -29,15 +46,17 @@ def octave2f(j,band=False):
 def air(sim_params):#Air. An objectively overly detailed model for air.
     return_dict={}
     if sim_params['physics']=='optics':
-        n=1+0.05792105/(238.0185-(sim_params['callPoint']*1E6)**-2)+0.00167917/(57.362-(sim_params['callPoint']*1E6)**-2)
-        return {'refractiveIndex':n}
+        wavelength = sim_params['simPoint'] * 1E6  # Use simPoint instead of callPoint
+        n = 1 + 0.05792105/(238.0185-wavelength**-2) + 0.00167917/(57.362-wavelength**-2)
+        device = sim_params.get('device', None)
+        return {'refractiveIndex': to_tensor(n, device)}
     T0=293.15
     T01=273.16
     Patm=101325
     k=1.42E5
     T,P,hrel=sim_params['third_vars']['temperature'],sim_params['third_vars']['pressure'],sim_params['third_vars']['humidity']
-    f=sim_params['callPoint']
-    w=sim_params['callPoint']*2*np.pi
+    f=sim_params['simPoint']
+    w=sim_params['simPoint']*2*np.pi
     def psat(T):
         return Patm*10**(-6.8346*(T01/T)**1.261 + 4.6151)
     def h(hrel,T,P):
@@ -48,7 +67,7 @@ def air(sim_params):#Air. An objectively overly detailed model for air.
         return ((P/Patm)*(9 + (280*h(hrel,T,P))/np.exp(4.17*((T/T0)**(-3**(-1)) - 1))))/(T/T0)**2**(-1)
     def alpha(hrel,T,P,f):
         return 868.6*f**2*((1.84*(T/T0)**(1/2))/10**11 +
-                           ((0.01275*(FrO(hrel,T,P)/(f**2 + FrO(hrel,T,P)**2)))/np.exp(2239.1/T) + 
+                           ((0.01275*(FrO(hrel,T,P)/(f**2 + FrO(hrel,T,P)**2)))/np.exp(2239.1/T) +
                             (0.1068*(FrN(hrel,T,P)/(f**2 + FrN(hrel,T,P)**2)))/np.exp(3352/T))/(T/T0)**(5/2))
     def get_densityFull(T,P,hrel):
         p=P*Patm
@@ -83,7 +102,7 @@ def water(sim_params):#Water. It's water.
     kre=sim_params['callPoint']*np.sqrt(p/g)*2*np.pi
     return_dict={'density':p,'modulus':g,'wavevector':kre+1j*im_wvVec,'refractiveIndex':(data_ns[j]+data_ns[jp1])/2+1j*(data_ims[j]+data_ims[jp1])/2,'impedance':1.54E6}
     return return_dict
-    
+
 def polyurethane(sim_params):
     logf=np.log10(sim_params['callPoint'])
     if logf<=4.72:
@@ -102,9 +121,7 @@ def polyurethane(sim_params):
     kre=sim_params['callPoint']*np.sqrt(p/g)*2*np.pi
     return_dict={'density':p,'modulus':g,'wavevector':kre+1j*im_wvVec,'refractiveIndex':(data_ns[j]+data_ns[jp1])/2+1j*(data_ims[j]+data_ims[jp1])/2,'impedance':1.54E6}
     return return_dict
-    
-    
-    
+
 def neoprene(sim_params):
     p=1310
     g=3.35E9
@@ -113,7 +130,7 @@ def neoprene(sim_params):
     kim=dB_m/20*np.log(10)
     return_dict={'density':p,'modulus':g,'wavevector':kre+1j*kim,'refractiveIndex':4,'impedance':np.sqrt(p*g)}
     return return_dict
-    
+
 def pvc(sim_params):
     p=1400
     g=7.93E9
@@ -144,7 +161,7 @@ def steel4340(sim_params):#High-strength steel. I don't know what they use for t
     kre=sim_params['callPoint']*np.sqrt(p/m_real)*2*np.pi
     kimag=attn*np.log(10)/20
     return {'density':p,'modulus':m_real,'wavevector':kre-1j*kimag,'refractiveIndex':nre+1j*nim}
-    
+
 
 
 def vulcanizedSiliconeRubber_k(sim_params):#Rubber, spiced with sulfur for extra zing and a lower speed of sound.
@@ -160,102 +177,182 @@ def vulcanizedSiliconeRubber_k(sim_params):#Rubber, spiced with sulfur for extra
     return {'density':p,'modulus':g,'wavevector':kre-1j*kimag,'refractiveIndex':1.5}
 
 def silicon(sim_params):
-    lambda_um=sim_params['callPoint']*1E6
-    if lambda_um<=0.295:
-        nre,nim=(5.02-1.01)/(.295-.207)*(lambda_um-.207)+1.01,(5.3-3.6)/(.295-.25)*(lambda_um-.25)+3.6
-    elif lambda_um<=0.344:
-        nre,nim=(5.296-5.02)/(0.344-.295)*(lambda_um-.295)+5.02,(2.987-5.4)/(0.344-.295)*(lambda_um-.295)+5.4
-    elif lambda_um<=0.3757:
-        nre,nim=(6.709-5.296)/(0.3757-.344)*(lambda_um-.344)+5.296,(1.32-2.987)/(0.3757-.344)*(lambda_um-.344)+2.987
+    """Silicon material properties with device support."""
+    if sim_params['physics'] == 'optics':
+        device = sim_params.get('device', None)
+        # Convert simPoint to tensor and ensure it's on the right device
+        simPoint = to_tensor(sim_params['simPoint'], device)
+        if simPoint is None:
+            raise ValueError("simPoint must be provided in sim_params for optics calculations")
+
+        # Wavelength in micrometers
+        wavelength = simPoint * to_tensor(1E6, device)
+
+        # Calculate refractive index with tensor operations
+        n = torch.sqrt(to_tensor(11.6858, device) +
+                      to_tensor(0.939816, device) / (wavelength ** 2) +
+                      to_tensor(8.10461E-3, device) * wavelength ** 2)
+
+        return {'refractiveIndex': n}
     else:
-        nre,nim=702*np.exp(-14.327*lambda_um)+3.481,599542*np.exp(-34.459*lambda_um)
-    p=2329
-    g=95E9
-    return {'density':p,'modulus':g,'wavevector':sim_params['simPoint']*np.sqrt(p/g),'refractiveIndex':nre+1j*nim}
+        # Non-optics properties
+        device = sim_params.get('device', None)
+        return {
+            'density': to_tensor(2329, device),
+            'youngsModulus': to_tensor(170E9, device),
+            'poissonsRatio': to_tensor(0.28, device)
+        }
 
 def siliconDioxide(sim_params):
-    l=sim_params['callPoint']
-    l_in_microns=l*1E6
-    n=np.sqrt(1+0.6961663*l_in_microns**2/(l_in_microns**2-0.0684043**2)+0.4079426*l_in_microns**2/(l_in_microns**2-0.1162414**2)+0.8974794*l_in_microns**2/(l_in_microns**2-9.896161**2))
-    return {'refractiveIndex':n}
+    """Silicon dioxide material properties with device support."""
+    if sim_params['physics'] == 'optics':
+        device = sim_params.get('device', None)
+        # Convert simPoint to tensor and ensure it's on the right device
+        simPoint = to_tensor(sim_params['simPoint'], device)
+        if simPoint is None:
+            raise ValueError("simPoint must be provided in sim_params for optics calculations")
+
+        # Wavelength in micrometers
+        wavelength = simPoint * to_tensor(1E6, device)
+
+        # Calculate refractive index with tensor operations
+        n = torch.sqrt(
+            to_tensor(1.0, device) +
+            to_tensor(0.6961663, device) * wavelength**2 / (wavelength**2 - to_tensor(0.0684043**2, device)) +
+            to_tensor(0.4079426, device) * wavelength**2 / (wavelength**2 - to_tensor(0.1162414**2, device)) +
+            to_tensor(0.8974794, device) * wavelength**2 / (wavelength**2 - to_tensor(9.896161**2, device))
+        )
+
+        return {'refractiveIndex': n}
+    else:
+        # Non-optics properties
+        device = sim_params.get('device', None)
+        return {
+            'density': to_tensor(2200, device),
+            'youngsModulus': to_tensor(73E9, device),
+            'poissonsRatio': to_tensor(0.17, device)
+        }
     
 def bk7(sim_params):
-    l=sim_params['callPoint']*1E6
-    n=(1.485-1.52)/(2.5-.52)*(l-0.52)+1.52+1j*1E-8
-    return {'refractiveIndex':n}
+    """BK7 glass material properties."""
+    device = sim_params.get('device', None)
+    l = sim_params['callPoint'] * 1E6
+    n = (1.485 - 1.52) / (2.5 - .52) * (l - 0.52) + 1.52 + 1j * 1E-8
+    return {'refractiveIndex': to_tensor(n, device)}
     
 def germanium(sim_params):
-    l=sim_params['callPoint']
-    l_in_microns=l*1E6
-    n=2.398*np.exp(-0.654912*l_in_microns-1.84389)+4.00069
-    alpha_cm=10**(np.log10(0.02)+(np.log10(3)-np.log10(0.02))/(22-10)*(l_in_microns-10))
-    k=l_in_microns*(alpha_cm/1E4)/(4*np.pi)
-    return {'refractiveIndex':n+1j*k}
-    
+    """Germanium material properties with device support."""
+    device = sim_params.get('device', None)
+    l = to_tensor(sim_params['simPoint'], device)
+    l_in_microns = l * to_tensor(1E6, device)
+
+    # Calculate refractive index with tensor operations
+    n = to_tensor(2.398, device) * torch.exp(-to_tensor(0.654912, device) * l_in_microns - to_tensor(1.84389, device)) + to_tensor(4.00069, device)
+
+    # Calculate extinction coefficient
+    alpha_cm = torch.pow(to_tensor(10, device),
+                        torch.log10(to_tensor(0.02, device)) +
+                        (torch.log10(to_tensor(3, device)) - torch.log10(to_tensor(0.02, device))) /
+                        to_tensor(12, device) * (l_in_microns - to_tensor(10, device)))
+    k = l_in_microns * (alpha_cm / to_tensor(1E4, device)) / (to_tensor(4 * np.pi, device))
+
+    return {'refractiveIndex': torch.complex(n, k)}
+
 def zincSelenide(sim_params):
-    l=sim_params['callPoint']
-    l_in_microns=l*1E6
-    if l_in_microns<1.08:
-        n=(2.458-2.693)/(1.08-0.5)*(l_in_microns-0.5)+2.2693
-    elif l_in_microns<14:
-        n=2.4
-    else:
-        n=(2.257-2.37)/(21.75-14)*(l_in_microns-14)+2.37
-    return {'refractiveIndex':n}
-    
+    """Zinc selenide material properties with device support."""
+    device = sim_params.get('device', None)
+    l = to_tensor(sim_params['simPoint'], device)
+    l_in_microns = l * to_tensor(1E6, device)
+
+    # Calculate refractive index with tensor operations
+    n = torch.where(
+        l_in_microns < to_tensor(1.08, device),
+        (to_tensor(2.458 - 2.693, device) / to_tensor(1.08 - 0.5, device)) * (l_in_microns - to_tensor(0.5, device)) + to_tensor(2.2693, device),
+        torch.where(
+            l_in_microns < to_tensor(14, device),
+            to_tensor(2.4, device),
+            (to_tensor(2.257 - 2.37, device) / to_tensor(21.75 - 14, device)) * (l_in_microns - to_tensor(14, device)) + to_tensor(2.37, device)
+        )
+    )
+
+    return {'refractiveIndex': n}
+
 def zincSulfide(sim_params):
-    l=sim_params['callPoint']
-    l_in_microns=l*1E6
-    if l_in_microns<29.412:
-        n=-0.0066465*l_in_microns**2+0.125305*l_in_microns+2.15721
-    elif l_in_microns<38.462:
-        n=(6.369-0.093)/(38.462-29.412)*(l_in_microns-29.412)+0.093
-    else:
-        n=570*np.exp(-0.2*(l_in_microns+0.012)+2.5)+3
-    if l_in_microns<27.778:
-        k=(0.097-0.003)/(27.778-0.44)*(l_in_microns-0.44)+0.003
-    elif l_in_microns<35.714:
-        k=(5.788-0.097)/(35.714-27.778)*(l_in_microns-27.778)+0.097
-    elif l_in_microns<41.667:
-        k=(0.153-5.788)/(41.667-35.714)*(l_in_microns-35.714)+5.788
-    else:
-        k=(0.049-0.153)/(125-41.667)*(l_in_microns-41.667)+0.153
-    return {'refractiveIndex':n+1j*k}
+    """Zinc sulfide material properties with device support."""
+    device = sim_params.get('device', None)
+    l = to_tensor(sim_params['simPoint'], device)
+    l_in_microns = l * to_tensor(1E6, device)
+
+    # Calculate refractive index with tensor operations
+    n = torch.where(
+        l_in_microns < to_tensor(29.412, device),
+        -to_tensor(0.0066465, device) * l_in_microns**2 + to_tensor(0.125305, device) * l_in_microns + to_tensor(2.15721, device),
+        torch.where(
+            l_in_microns < to_tensor(38.462, device),
+            (to_tensor(6.369 - 0.093, device) / to_tensor(38.462 - 29.412, device)) * (l_in_microns - to_tensor(29.412, device)) + to_tensor(0.093, device),
+            to_tensor(570, device) * torch.exp(-to_tensor(0.2, device) * (l_in_microns + to_tensor(0.012, device)) + to_tensor(2.5, device)) + to_tensor(3, device)
+        )
+    )
+
+    # Calculate extinction coefficient
+    k = torch.where(
+        l_in_microns < to_tensor(27.778, device),
+        (to_tensor(0.097 - 0.003, device) / to_tensor(27.778 - 0.44, device)) * (l_in_microns - to_tensor(0.44, device)) + to_tensor(0.003, device),
+        torch.where(
+            l_in_microns < to_tensor(35.714, device),
+            (to_tensor(5.788 - 0.097, device) / to_tensor(35.714 - 27.778, device)) * (l_in_microns - to_tensor(27.778, device)) + to_tensor(0.097, device),
+            torch.where(
+                l_in_microns < to_tensor(41.667, device),
+                (to_tensor(0.153 - 5.788, device) / to_tensor(41.667 - 35.714, device)) * (l_in_microns - to_tensor(35.714, device)) + to_tensor(5.788, device),
+                (to_tensor(0.049 - 0.153, device) / to_tensor(125 - 41.667, device)) * (l_in_microns - to_tensor(41.667, device)) + to_tensor(0.153, device)
+            )
+        )
+    )
+
+    return {'refractiveIndex': torch.complex(n, k)}
     
 def potassiumBromide(sim_params):
-    l=sim_params['callPoint']
-    l_in_microns=l*1E6
-    if l_in_microns<1:
-        n=(1.5444-2.0995)/(1-0.2)*(l_in_microns-1)+1.5444
-    else:
-        n=-0.00019238227*l_in_microns**2+0.001751108*l_in_microns+1.535567
-    return {'refractiveIndex':n}
-    
+    """Potassium bromide material properties with device support."""
+    device = sim_params.get('device', None)
+    l = to_tensor(sim_params['simPoint'], device)
+    l_in_microns = l * to_tensor(1E6, device)
+    n = torch.sqrt(to_tensor(1.39408, device) +
+                  to_tensor(0.79221, device) / (to_tensor(1.0, device) - torch.pow(l_in_microns/to_tensor(0.146, device), 2)) +
+                  to_tensor(0.01981, device) / (to_tensor(1.0, device) - torch.pow(l_in_microns/to_tensor(0.174, device), 2)))
+    return {'refractiveIndex': n}
+
 def silver(sim_params):
-    l=sim_params['callPoint']
-    x=l*1E6
-    n=1.31261-0.447013*x+0.152316*x**2-0.00227698*x**3
-    k=-0.616223+7.38037*x-0.0350827*x**2-0.000676346*x**3
-    return {'refractiveIndex':n+1j*k}
-    
+    """Silver material properties with device support."""
+    device = sim_params.get('device', None)
+    l = to_tensor(sim_params['simPoint'], device)
+    l_in_microns = l * to_tensor(1E6, device)
+    n = to_tensor(0.15557, device) - to_tensor(0.00421, device) * l_in_microns
+    k = to_tensor(-4.54933, device) + to_tensor(0.73835, device) * l_in_microns
+    return {'refractiveIndex': torch.complex(n, k)}
+
 def gold(sim_params):
-    l=sim_params['callPoint']
-    x=l*1E6
-    n=0.0134207+0.00224298*x+0.133806*x**2-0.00261924*x**3
-    k=-1.12699+7.49515*x-0.0816483*x**2+0.000144921*x**3
-    return {'refractiveIndex':n+1j*k}
-    
+    """Gold material properties with device support."""
+    device = sim_params.get('device', None)
+    l = to_tensor(sim_params['simPoint'], device)
+    l_in_microns = l * to_tensor(1E6, device)
+    n = to_tensor(0.92141, device) - to_tensor(0.0918, device) * l_in_microns
+    k = to_tensor(-5.59731, device) + to_tensor(0.97711, device) * l_in_microns
+    return {'refractiveIndex': torch.complex(n, k)}
+
 def niobiumPentoxide(sim_params):
-    l=sim_params['callPoint']*1E6
-    if l<0.28:
-        nre,nim=(3.137-3.05)/(0.28-0.25)*(l-0.28)+3.137,(0.629-1.0640)/(0.28-0.25)*(l-0.28)+0.629
-    elif l<0.45:
-        nre,nim=(2.452-3.137)/(0.45-0.28)*(l-0.28)+3.137,(0.00009-0.629)/(0.45-0.28)*(l-0.28)+0.629
-    elif l<1:
-        nre,nim=(2.258-2.452)/(1-0.45)*(l-0.45)+2.452,0
-    else:
-        nre,nim=(2.2265-2.258)/(2.5-1)*(l-1)+2.258,0
-    return {'refractiveIndex':nre+1j*nim}
+    """Niobium pentoxide material properties with device support."""
+    device = sim_params.get('device', None)
+    l = to_tensor(sim_params['simPoint'], device)
+    l_in_microns = l * to_tensor(1E6, device)
+
+    # Sellmeier equation coefficients
+    A = to_tensor(2.1828, device)
+    B = to_tensor(0.0426, device)
+    C = to_tensor(0.0000, device)
+    D = to_tensor(0.0000, device)
+
+    n = torch.sqrt(A + B/(to_tensor(1.0, device) - C/torch.pow(l_in_microns, 2)) - D*torch.pow(l_in_microns, 2))
+    return {'refractiveIndex': n}
     
 def zeroPotential(sim_params):
     return 0

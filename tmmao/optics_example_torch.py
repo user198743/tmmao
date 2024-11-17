@@ -5,7 +5,12 @@ from optics_physics_package_torch import optics_tmm  # Use PyTorch version
 import materials_library
 import matplotlib.pyplot as plt
 
-def main():
+def main(device=None):
+    # Set default device if none specified
+    if device is None:
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    print(f"Using device: {device}")
+
     # Initialize scheduler
     ds = dyn_sched()
 
@@ -17,10 +22,11 @@ def main():
                       0.4825611995119943, 0.19989972134583547, 0.14736970395447987,
                       0.10213421303000284, 0.16361662441880945, 0.2796481376976949,
                       0.10995312837538893, 0.5725525242494137, 0.19900440425370333],
-                     dtype=torch.float64)
+                     dtype=torch.float64, device=device)
 
-    # Load physics functions
-    ad.set_physics(physics_package=optics_tmm,
+    # Load physics functions with device
+    physics = optics_tmm  # Pass the class, not an instance
+    ad.set_physics(physics_package=physics,
                   mat1Call=materials_library.siliconDioxide,
                   mat2Call=materials_library.silicon,
                   param0Call=materials_library.air,
@@ -36,7 +42,7 @@ def main():
     # Initialize structure
     ad.set_structure(simType='independent',
                     num_layers=12,
-                    initial_layer_thickness=x0.tolist(),  # Convert tensor back to list for compatibility
+                    initial_layer_thickness=x0.cpu().tolist(),  # Convert tensor to CPU before converting to list
                     initial_ys=[1,0]*6,
                     y_bounds=[0,1],
                     x_bounds=[0.005,1],
@@ -129,4 +135,4 @@ def condition_checker_moe(sim_params):
     return {'transmission': 1.0}
 
 if __name__ == "__main__":
-    main()
+    main()  # Uses default device (CUDA if available, else CPU)
